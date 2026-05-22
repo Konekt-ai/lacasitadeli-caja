@@ -8,30 +8,45 @@ import subprocess
 import sys
 import os
 
-DB_URL = "postgresql://neondb_owner:npg_M0gYeTvqAS6F@ep-rapid-wildflower-an0psjmg-pooler.c-6.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+from dotenv import load_dotenv
 
-def instalar_psycopg2():
-    print("📦 Instalando psycopg2-binary...")
+load_dotenv("apps/api/.env")
+
+def instalar_dependencias():
+    print("📦 Instalando pymssql y python-dotenv...")
     result = subprocess.run(
-        [sys.executable, "-m", "pip", "install", "psycopg2-binary"],
+        [sys.executable, "-m", "pip", "install", "pymssql", "python-dotenv"],
         capture_output=True, text=True
     )
     if result.returncode == 0:
-        print("   ✅ psycopg2-binary instalado correctamente")
+        print("   ✅ Dependencias instaladas correctamente")
         return True
     else:
         print(f"   ❌ Error: {result.stderr}")
         return False
 
 def probar_conexion():
-    print("\n🔌 Probando conexión a Neon PostgreSQL...")
+    print("\n🔌 Probando conexión a SQL Server...")
     try:
-        import psycopg2
-        conn = psycopg2.connect(DB_URL, connect_timeout=10)
+        import pymssql
+        server = os.environ.get("MSSQL_SERVER", r"localhost\SQLEXPRESS")
+        database = os.environ.get("MSSQL_DATABASE", "novacaja22")
+        user = os.environ.get("MSSQL_USER", "sa")
+        password = os.environ.get("MSSQL_PASSWORD", "TuPassword")
+        port = os.environ.get("MSSQL_PORT", "1433")
+
+        conn = pymssql.connect(
+            server=server,
+            user=user,
+            password=password,
+            database=database,
+            port=port,
+            login_timeout=10
+        )
         cur = conn.cursor()
-        cur.execute("SELECT version()")
+        cur.execute("SELECT @@VERSION")
         version = cur.fetchone()[0]
-        print(f"   ✅ Conectado a: {version[:60]}...")
+        print(f"   ✅ Conectado a: {str(version)[:60]}...")
         conn.close()
         return True
     except Exception as e:
@@ -44,7 +59,7 @@ def main():
     print("  La Casita Delicatessen — Configuración del Sistema")
     print("=" * 55)
 
-    ok_pip = instalar_psycopg2()
+    ok_pip = instalar_dependencias()
     
     if ok_pip:
         probar_conexion()
