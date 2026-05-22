@@ -13,24 +13,25 @@ import io
 import urllib.request
 import urllib.error
 
-# ── Pillow para imágenes ────────────────────────────────────────
+# ── pymssql y sqlite3 ───────────────────────────────────────────
 try:
-    from PIL import Image, ImageTk, ImageDraw, ImageFilter
-    PIL_AVAILABLE = True
-except ImportError:
-    PIL_AVAILABLE = False
-    print("[IMG] Pillow no disponible — pip install pillow")
-
-# ── psycopg2 ────────────────────────────────────────────────────
-try:
-    import psycopg2
-    import psycopg2.extras
+    import pymssql
+    import sqlite3
     DB_AVAILABLE = True
 except ImportError:
     DB_AVAILABLE = False
 
 # ── Configuración ────────────────────────────────────────────────
-DB_URL = "postgresql://neondb_owner:npg_M0gYeTvqAS6F@ep-rapid-wildflower-an0psjmg-pooler.c-6.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+import os
+from dotenv import load_dotenv
+
+load_dotenv("apps/api/.env")
+
+MSSQL_SERVER = os.environ.get("MSSQL_SERVER", r"localhost\SQLEXPRESS")
+MSSQL_DATABASE = os.environ.get("MSSQL_DATABASE", "novacaja22")
+MSSQL_USER = os.environ.get("MSSQL_USER", "sa")
+MSSQL_PASSWORD = os.environ.get("MSSQL_PASSWORD", "TuPassword")
+MSSQL_PORT = os.environ.get("MSSQL_PORT", "1433")
 
 # ── PALETA ───────────────────────────────────────────────────────
 C = {
@@ -85,76 +86,16 @@ def _fb(size=10):
     return (F_BRAND, size, "bold")
 
 
-# ── Caché de imágenes ────────────────────────────────────────────
-_img_cache: dict = {}
-_img_lock = threading.Lock()
-
-def load_image_async(url: str, size: tuple, callback):
-    """Descarga y redimensiona una imagen en hilo background, luego llama callback(PhotoImage)."""
-    if not PIL_AVAILABLE:
-        callback(None)
-        return
-
-    key = (url, size)
-    with _img_lock:
-        if key in _img_cache:
-            callback(_img_cache[key])
-            return
-
-    def _fetch():
-        try:
-            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-            with urllib.request.urlopen(req, timeout=6) as resp:
-                data = resp.read()
-            img = Image.open(io.BytesIO(data)).convert("RGBA")
-
-            # Recorte cuadrado centrado
-            w, h = img.size
-            side = min(w, h)
-            left = (w - side) // 2
-            top  = (h - side) // 2
-            img = img.crop((left, top, left + side, top + side))
-            img = img.resize(size, Image.LANCZOS)
-
-            # Esquinas redondeadas
-            mask = Image.new("L", size, 0)
-            draw = ImageDraw.Draw(mask)
-            r = 12
-            draw.rounded_rectangle([0, 0, size[0]-1, size[1]-1], radius=r, fill=255)
-            img.putalpha(mask)
-
-            photo = ImageTk.PhotoImage(img)
-            with _img_lock:
-                _img_cache[key] = photo
-            callback(photo)
-        except Exception as e:
-            callback(None)
-
-    threading.Thread(target=_fetch, daemon=True).start()
-
-
-def make_placeholder(size: tuple, color: str = "#E8E3DA") -> "ImageTk.PhotoImage | None":
-    if not PIL_AVAILABLE:
-        return None
-    img = Image.new("RGBA", size, color + "FF")
-    draw = ImageDraw.Draw(img)
-    # Grid lines decorativas
-    for i in range(0, size[0], 20):
-        draw.line([(i, 0), (i, size[1])], fill=color[:-2] + "30" if len(color) == 7 else "#00000010", width=1)
-    photo = ImageTk.PhotoImage(img)
-    return photo
-
-
 # ── Datos mock ───────────────────────────────────────────────────
 MOCK_PRODUCTS = [
-    {"id": 1,  "codigo_barras": "QSO-001", "nombre": "Queso Manchego",       "precio_venta": 189.00, "stock_actual": 24, "stock_minimo": 5, "categoria": "Quesos",       "imagen_url": None},
-    {"id": 2,  "codigo_barras": "CRN-002", "nombre": "Jamón Serrano",         "precio_venta": 320.00, "stock_actual": 5,  "stock_minimo": 5, "categoria": "Carnes Frías", "imagen_url": None},
-    {"id": 3,  "codigo_barras": "VIN-003", "nombre": "Vino Tinto Reserva",    "precio_venta": 285.00, "stock_actual": 12, "stock_minimo": 5, "categoria": "Vinos",        "imagen_url": None},
-    {"id": 4,  "codigo_barras": "PAN-004", "nombre": "Pan Baguette",          "precio_venta":  45.00, "stock_actual": 20, "stock_minimo": 5, "categoria": "Panadería",    "imagen_url": None},
-    {"id": 5,  "codigo_barras": "ACE-005", "nombre": "Aceite de Oliva",       "precio_venta": 198.00, "stock_actual":  9, "stock_minimo": 5, "categoria": "Aceites",      "imagen_url": None},
-    {"id": 6,  "codigo_barras": "DLC-006", "nombre": "Chocolate Belga 70%",   "precio_venta": 125.00, "stock_actual":  3, "stock_minimo": 5, "categoria": "Dulces",       "imagen_url": None},
-    {"id": 7,  "codigo_barras": "QSO-007", "nombre": "Queso Brie",            "precio_venta": 165.00, "stock_actual":  7, "stock_minimo": 5, "categoria": "Quesos",       "imagen_url": None},
-    {"id": 8,  "codigo_barras": "CRN-008", "nombre": "Salami Italiano",       "precio_venta": 145.00, "stock_actual":  0, "stock_minimo": 5, "categoria": "Carnes Frías", "imagen_url": None},
+    {"id": 1,  "codigo_barras": "QSO-001", "nombre": "Queso Manchego",       "precio_venta": 189.00, "stock_actual": 24, "stock_minimo": 5, "categoria": "Quesos"},
+    {"id": 2,  "codigo_barras": "CRN-002", "nombre": "Jamón Serrano",         "precio_venta": 320.00, "stock_actual": 5,  "stock_minimo": 5, "categoria": "Carnes Frías"},
+    {"id": 3,  "codigo_barras": "VIN-003", "nombre": "Vino Tinto Reserva",    "precio_venta": 285.00, "stock_actual": 12, "stock_minimo": 5, "categoria": "Vinos"},
+    {"id": 4,  "codigo_barras": "PAN-004", "nombre": "Pan Baguette",          "precio_venta":  45.00, "stock_actual": 20, "stock_minimo": 5, "categoria": "Panadería"},
+    {"id": 5,  "codigo_barras": "ACE-005", "nombre": "Aceite de Oliva",       "precio_venta": 198.00, "stock_actual":  9, "stock_minimo": 5, "categoria": "Aceites"},
+    {"id": 6,  "codigo_barras": "DLC-006", "nombre": "Chocolate Belga 70%",   "precio_venta": 125.00, "stock_actual":  3, "stock_minimo": 5, "categoria": "Dulces"},
+    {"id": 7,  "codigo_barras": "QSO-007", "nombre": "Queso Brie",            "precio_venta": 165.00, "stock_actual":  7, "stock_minimo": 5, "categoria": "Quesos"},
+    {"id": 8,  "codigo_barras": "CRN-008", "nombre": "Salami Italiano",       "precio_venta": 145.00, "stock_actual":  0, "stock_minimo": 5, "categoria": "Carnes Frías"},
 ]
 MOCK_USER     = {"id": 2, "name": "Cajero 1", "role": "cajero"}
 MOCK_LOCATION = {"id": "L01", "name": "Sucursal Centro"}
@@ -180,15 +121,65 @@ CAT_ICONS = {
 class DBManager:
     def __init__(self):
         self.conn      = None
+        self.sqlite_conn = None
         self.connected = False
         self._connect()
+        self._connect_sqlite()
+
+    def _connect_sqlite(self):
+        if not DB_AVAILABLE:
+            return
+        try:
+            db_path = os.path.join("apps", "api", "lacasita.db")
+            if not os.path.exists(os.path.dirname(db_path)):
+                db_path = "lacasita.db"
+            self.sqlite_conn = sqlite3.connect(db_path, check_same_thread=False)
+
+            # Create tables if they don't exist
+            cur = self.sqlite_conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS ventas (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    folio TEXT,
+                    fecha DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    canal TEXT,
+                    usuario_id INTEGER,
+                    metodo_pago TEXT,
+                    subtotal REAL,
+                    impuestos REAL,
+                    total REAL,
+                    cliente TEXT,
+                    sucursal TEXT
+                )
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS detalle_venta (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    venta_id INTEGER,
+                    producto_id INTEGER,
+                    cantidad INTEGER,
+                    precio_unitario REAL,
+                    subtotal REAL,
+                    FOREIGN KEY(venta_id) REFERENCES ventas(id)
+                )
+            """)
+            self.sqlite_conn.commit()
+        except Exception as e:
+            print(f"[SQLite] {e}")
 
     def _connect(self):
         if not DB_AVAILABLE:
             return
         try:
-            self.conn = psycopg2.connect(DB_URL, connect_timeout=8)
-            self.conn.autocommit = False
+            self.conn = pymssql.connect(
+                server=MSSQL_SERVER,
+                user=MSSQL_USER,
+                password=MSSQL_PASSWORD,
+                database=MSSQL_DATABASE,
+                port=MSSQL_PORT,
+                login_timeout=8
+            )
+            self.conn.autocommit(False)
             self.connected = True
             self._sync_folio_counter()
         except Exception as e:
@@ -211,8 +202,15 @@ class DBManager:
             return True
         except:
             try:
-                self.conn = psycopg2.connect(DB_URL, connect_timeout=5)
-                self.conn.autocommit = False
+                self.conn = pymssql.connect(
+                    server=MSSQL_SERVER,
+                    user=MSSQL_USER,
+                    password=MSSQL_PASSWORD,
+                    database=MSSQL_DATABASE,
+                    port=MSSQL_PORT,
+                    login_timeout=5
+                )
+                self.conn.autocommit(False)
                 return True
             except:
                 self.connected = False
@@ -222,14 +220,13 @@ class DBManager:
         if not self._ensure_connection():
             return self._filter_mock(search, category)
         try:
-            cur = self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur = self.conn.cursor(as_dict=True)
             q = """
                 SELECT p.id, p.codigo_barras, p.nombre, p.precio_venta,
-                       p.stock_actual, p.stock_minimo, c.nombre AS categoria,
-                       p.imagen_url
+                       p.stock_actual, p.stock_minimo, c.nombre AS categoria
                 FROM productos p
                 LEFT JOIN categorias c ON c.id = p.categoria_id
-                WHERE p.activo = TRUE
+                WHERE p.activo = 1
             """
             params = []
             if search:
@@ -239,7 +236,7 @@ class DBManager:
                 q += " AND c.nombre = %s"
                 params.append(category)
             q += " ORDER BY c.nombre, p.nombre"
-            cur.execute(q, params)
+            cur.execute(q, tuple(params))
             return [dict(r) for r in cur.fetchall()]
         except Exception as e:
             try: self.conn.rollback()
@@ -250,13 +247,13 @@ class DBManager:
         if not self._ensure_connection():
             return next((p for p in MOCK_PRODUCTS if p["codigo_barras"].lower() == barcode.lower()), None)
         try:
-            cur = self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur = self.conn.cursor(as_dict=True)
             cur.execute("""
                 SELECT p.id, p.codigo_barras, p.nombre, p.precio_venta,
-                       p.stock_actual, p.stock_minimo, c.nombre AS categoria, p.imagen_url
+                       p.stock_actual, p.stock_minimo, c.nombre AS categoria
                 FROM productos p
                 LEFT JOIN categorias c ON c.id = p.categoria_id
-                WHERE p.activo=TRUE AND LOWER(p.codigo_barras)=LOWER(%s)
+                WHERE p.activo=1 AND LOWER(p.codigo_barras)=LOWER(%s)
             """, (barcode,))
             row = cur.fetchone()
             return dict(row) if row else None
@@ -268,7 +265,7 @@ class DBManager:
             return p["stock_actual"] if p else 0
         try:
             cur = self.conn.cursor()
-            cur.execute("SELECT stock_actual FROM productos WHERE id=%s", (product_id,))
+            cur.execute("SELECT stock_actual FROM productos WHERE id=%d", (product_id,))
             row = cur.fetchone()
             return row[0] if row else 0
         except: return 0
@@ -281,34 +278,38 @@ class DBManager:
             cur.execute("""
                 SELECT DISTINCT c.nombre FROM categorias c
                 JOIN productos p ON p.categoria_id=c.id
-                WHERE c.activo=TRUE AND p.activo=TRUE ORDER BY c.nombre
+                WHERE c.activo=1 AND p.activo=1 ORDER BY c.nombre
             """)
             return [r[0] for r in cur.fetchall()]
         except: return []
 
     def save_sale(self, folio, cart, total, subtotal, tax, payment, cashier, location, usuario_id=None):
-        if not self._ensure_connection():
+        if not self.sqlite_conn:
             return None, "sin_conexion"
-        import json
-        items_json = json.dumps([{
-            "producto_id": i["product"]["id"],
-            "cantidad": i["qty"],
-            "precio_unitario": float(i["product"]["precio_venta"])
-        } for i in cart])
         uid = usuario_id or self._get_or_create_user_id(cashier)
         try:
-            cur = self.conn.cursor()
-            cur.execute("SELECT registrar_venta(%s,%s,%s,%s,%s::jsonb)",
-                        (folio, "caja", uid, payment, items_json))
-            venta_id = cur.fetchone()[0]
-            self.conn.commit()
+            cur = self.sqlite_conn.cursor()
+            cur.execute("""
+                INSERT INTO ventas (folio, canal, usuario_id, metodo_pago, subtotal, impuestos, total, cliente, sucursal)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (folio, "caja", uid, payment, subtotal, tax, total, "Invitado", location))
+
+            venta_id = cur.lastrowid
+
+            for item in cart:
+                prod_id = item["product"]["id"]
+                qty = item["qty"]
+                price = float(item["product"]["precio_venta"])
+                item_subtotal = item["subtotal"]
+                cur.execute("""
+                    INSERT INTO detalle_venta (venta_id, producto_id, cantidad, precio_unitario, subtotal)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (venta_id, prod_id, qty, price, item_subtotal))
+
+            self.sqlite_conn.commit()
             return venta_id, None
-        except psycopg2.errors.RaiseException as e:
-            try: self.conn.rollback()
-            except: pass
-            return None, str(e).split("\n")[0]
         except Exception as e:
-            try: self.conn.rollback()
+            try: self.sqlite_conn.rollback()
             except: pass
             return None, str(e)
 
@@ -332,6 +333,9 @@ class DBManager:
     def close(self):
         if self.conn:
             try: self.conn.close()
+            except: pass
+        if self.sqlite_conn:
+            try: self.sqlite_conn.close()
             except: pass
 
 
@@ -420,24 +424,25 @@ class ProductCard(tk.Frame):
         self.is_low = 0 < stock <= min_stock
 
         self._build()
-        self._load_image()
         self._bind_events()
 
     def _build(self):
         p = self.product
         stock = p.get("stock_actual", 0)
 
-        # ── Área imagen ──────────────────────────────────────────
+        # ── Área emoji (reemplaza imagen) ────────────────────────
         self.img_frame = tk.Frame(self, bg=C["img_bg"],
                                   width=self.IMG_SIZE[0], height=self.IMG_SIZE[1])
         self.img_frame.pack(fill="x")
         self.img_frame.pack_propagate(False)
 
+        cat = p.get("categoria", "")
+        e = _cat_emoji(p)
         self.img_label = tk.Label(self.img_frame, bg=C["img_bg"],
-                                  text="", cursor="hand2" if not self.is_out else "arrow")
+                                  text=e, font=_f(30), cursor="hand2" if not self.is_out else "arrow")
         self.img_label.place(relx=0.5, rely=0.5, anchor="center")
 
-        # Badge stock (superpuesto sobre imagen)
+        # Badge stock (superpuesto sobre área emoji)
         if self.is_out:
             badge_bg, badge_fg, badge_txt = C["tag_red"], C["tag_red_fg"], "Agotado"
         elif self.is_low:
@@ -454,7 +459,6 @@ class ProductCard(tk.Frame):
         info.pack(fill="x")
 
         # Categoría
-        cat = p.get("categoria", "")
         tk.Label(info, text=cat.upper(), font=_f(7,"bold"),
                  bg=C["card_bg"], fg=C["green_mid"]).pack(anchor="w")
 
@@ -478,36 +482,6 @@ class ProductCard(tk.Frame):
         if sku:
             tk.Label(bottom, text=sku, font=_f(7),
                      bg=C["card_bg"], fg=C["text3"]).pack(side="right", anchor="s", pady=1)
-
-    def _load_image(self):
-        url = self.product.get("imagen_url")
-        if url and PIL_AVAILABLE and url.startswith("http"):
-            # Mostrar placeholder mientras carga
-            ph = make_placeholder(self.IMG_SIZE, C["img_bg"])
-            if ph:
-                self.img_label.config(image=ph)
-                self._photo = ph
-
-            def on_loaded(photo):
-                if self._destroyed: return
-                if photo:
-                    self.img_label.config(image=photo,
-                        bg=C["img_bg"] if not self.is_out else "#F5F0EA")
-                    self._photo = photo
-                else:
-                    self.img_label.config(text="📦", font=_f(28), image="")
-
-            load_image_async(url, self.IMG_SIZE, on_loaded)
-        else:
-            # Fallback emoji
-            emoji_map = {
-                "Quesos":"🧀","Carnes Frías":"🥩","Vinos":"🍷","Panadería":"🥖",
-                "Aceites":"🫒","Dulces":"🍬","Bebidas":"🥤","Botanas":"🍿",
-                "Lácteos":"🥛","Abarrotes":"🌾",
-            }
-            cat = self.product.get("categoria","")
-            e = emoji_map.get(cat, "📦")
-            self.img_label.config(text=e, font=_f(30), image="")
 
     def _bind_events(self):
         widgets = [self, self.img_frame, self.img_label]
@@ -659,7 +633,7 @@ class CajaApp(tk.Tk):
         sep3.pack(side="right", fill="y", pady=12, padx=8)
         hints = tk.Frame(right, bg=C["header"])
         hints.pack(side="right")
-        for k, v in [("F1","Buscar"), ("F2","Cobrar"), ("F3","Limpiar")]:
+        for k, v in [("F8","Limpiar 1 prod"), ("F9","Borrar todos"), ("F10","Cobrar")]:
             r = tk.Frame(hints, bg=C["header"])
             r.pack(side="left", padx=6)
             tk.Label(r, text=k, font=_f(7,"bold"), bg="#2A3E30",
@@ -741,8 +715,9 @@ class CajaApp(tk.Tk):
 
         # Keyboard
         self.bind_all("<F1>", lambda e: self.entry_search.focus_set())
-        self.bind_all("<F2>", lambda e: self._process_sale())
-        self.bind_all("<F3>", lambda e: self._clear_cart())
+        self.bind_all("<F8>", lambda e: self._remove_last_item())
+        self.bind_all("<F9>", lambda e: self._clear_cart())
+        self.bind_all("<F10>", lambda e: self._process_sale())
         self.bind_all("<Escape>", lambda e: (self.search_var.set(""),
                                               self.entry_search.focus_set()))
 
@@ -966,20 +941,8 @@ class CajaApp(tk.Tk):
         top.pack(fill="x")
 
         # Tiny thumbnail
-        thumb = tk.Label(top, bg=C["img_bg"], width=5, text="", font=_f(16))
+        thumb = tk.Label(top, bg=C["img_bg"], width=5, text=_cat_emoji(p), font=_f(16))
         thumb.pack(side="left", padx=(0,10))
-
-        url = p.get("imagen_url")
-        if url and PIL_AVAILABLE and url.startswith("http"):
-            def on_thumb(ph, lbl=thumb):
-                if ph:
-                    lbl.config(image=ph, text="")
-                    lbl._photo = ph
-                else:
-                    lbl.config(text=_cat_emoji(p))
-            load_image_async(url, (44, 44), on_thumb)
-        else:
-            thumb.config(text=_cat_emoji(p))
 
         info = tk.Frame(top, bg=C["surface"])
         info.pack(side="left", fill="x", expand=True)
@@ -1071,6 +1034,12 @@ class CajaApp(tk.Tk):
         self.cart.pop(idx)
         self._render_cart(); self._update_totals()
         Toast(self, f"Eliminado: {name[:22]}", "warning", 1200)
+
+    def _remove_last_item(self):
+        if not self.cart:
+            return
+        idx = len(self.cart) - 1
+        self._remove_item(idx)
 
     def _clear_cart(self):
         if not self.cart: return
